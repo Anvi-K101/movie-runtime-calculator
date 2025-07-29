@@ -1,7 +1,106 @@
-#!/usr/bin/env python3
+def display_media_showcase(media_data: dict, media_type: str):
+    """Display comprehensive media information with adaptive poster sizing and detailed description"""
+    if media_type == 'movie':
+        title = media_data.get('title', 'Unknown')
+        original_title = media_data.get('original_title', '')
+        year = media_data.get('release_date', '')[:4] if media_data.get('release_date') else 'Unknown'
+        genres = [genre['name'] for genre in media_data.get('genres', [])]
+    else:  # TV show
+        title = media_data.get('name', 'Unknown')
+        original_title = media_data.get('original_name', '')
+        year = media_data.get('first_air_date', '')[:4] if media_data.get('first_air_date') else 'Unknown'
+        genres = [genre['name'] for genre in media_data.get('genres', [])]
+    
+    # Display original title if different
+    display_title = title
+    if original_title and original_title != title:
+        display_title = f"{title} ({original_title})"
+    
+    # Get detailed description
+    detailed_description = get_detailed_description(media_data, media_type)
+    
+    rating = media_data.get('vote_average', 0)
+    vote_count = media_data.get('vote_count', 0)
+    poster_path = media_data.get('poster_path', '')
+    original_language = media_data.get('original_language', 'en').upper()
+    
+    # Calculate adaptive column sizes based on description length
+    description_length = len(detailed_description)
+    if description_length > 1200:
+        col_ratio = [1, 3.5]  # Much more space for extensive text
+    elif description_length > 800:
+        col_ratio = [1, 3]  # More space for text
+    elif description_length > 400:
+        col_ratio = [1, 2]  # Balanced
+    else:
+        col_ratio = [1, 1.5]  # More space for poster
+    
+    col1, col2 = st.columns(col_ratio)
+    
+    # Display poster
+    with col1:
+        if poster_path:
+            poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}"
+            st.image(poster_url, caption=f"{title} Poster", use_column_width=True)
+        else:
+            st.info("📽️ No poster available")
+        
+        # Language indicator
+        if original_language != 'EN':
+            st.info(f"🌐 Language: {original_language}")
+        
+        # Watchlist buttons
+        st.markdown("#### 📝 Add to Watchlist")
+        
+        watching_button = st.button(
+            "📺 Currently Watching" if not WatchlistManager.is_in_watchlist(media_data.get('id'), 'watching') else "✅ Currently Watching",
+            key=f"watching_{media_data.get('id')}",
+            use_container_width=True
+        )
+        
+        want_to_watch_button = st.button(
+            "⭐ Want to Watch" if not WatchlistManager.is_in_watchlist(media_data.get('id'), 'want_to_watch') else "✅ Want to Watch",
+            key=f"want_to_watch_{media_data.get('id')}",
+            use_container_width=True
+        )
+        
+        if watching_button:
+            if WatchlistManager.add_to_watchlist(media_data, 'watching'):
+                st.success("Added to Currently Watching!")
+            else:
+                st.info("Already in Currently Watching list")
+        
+        if want_to_watch_button:
+            if WatchlistManager.add_to_watchlist(media_data, 'want_to_watch'):
+                st.success("Added to Want to Watch!")
+            else:
+                st.info("Already in Want to Watch list")
+    
+    # Display information
+    with col2:
+        st.markdown(f"# 🎬 {display_title} ({year})")
+        
+        if genres:
+            genre_badges = " ".join([f"`{genre}`" for genre in genres])
+            st.markdown(f"**🎭 Genres:** {genre_badges}")
+        
+        # Rating display
+        sentiment, description, color = get_review_summary(rating, vote_count)
+        st.markdown(f"**⭐ Rating:** {sentiment} ({rating:.1f}/10)")
+        st.markdown(f"*{description}*")
+        st.caption(f"Based on {vote_count:,} user ratings")
+        
+        # Comprehensive Detailed Summary
+        st.markdown("### 📖 Comprehensive Details")
+        st.markdown(detailed_description)
+    
+    # Display star cast below
+    star_cast = get_star_cast(media_data)
+    display_star_cast(star_cast)#!/usr/bin/env python3
 """
-🎬 Movie & TV Show Runtime Calculator - Streamlit Web App
-Fetches detailed runtime information and helps with viewing schedules
+🎬 Movie & TV Show Runtime Calculator - Enhanced Streamlit Web App
+Fetches detailed runtime information, cast data, and helps with viewing schedules
+Includes watchlist functionality and detailed descriptions
 """
 
 import streamlit as st
@@ -11,6 +110,7 @@ from typing import Dict, List, Tuple, Optional
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import time
+import json
 
 # TMDb API Configuration
 API_KEY = "47aa3b4def8767b97ea958e92b233aec"
@@ -27,14 +127,14 @@ class RuntimeCalculator:
         }
     
     def search_suggestions(self, query: str, limit: int = 10) -> List[Dict]:
-        """Search for movies and TV shows with suggestions"""
+        """Search for movies and TV shows with suggestions - supports all languages"""
         if len(query) < 2:
             return []
         
         url = f"{BASE_URL}/search/multi"
         params = {
             "query": query,
-            "language": "en-US",
+            "include_adult": False,
             "page": 1
         }
         
@@ -48,16 +148,27 @@ class RuntimeCalculator:
             for item in data.get('results', [])[:limit]:
                 if item.get('media_type') in ['movie', 'tv']:
                     title = item.get('title') or item.get('name', 'Unknown')
+                    original_title = item.get('original_title') or item.get('original_name', '')
+                    
+                    # Show original title if different
+                    display_title = title
+                    if original_title and original_title != title:
+                        display_title = f"{title} ({original_title})"
+                    
                     year = ''
                     if item.get('release_date'):
-                        year = f" ({item['release_date'][:4]})"
+                        year = f" [{item['release_date'][:4]}]"
                     elif item.get('first_air_date'):
-                        year = f" ({item['first_air_date'][:4]})"
+                        year = f" [{item['first_air_date'][:4]}]"
+                    
+                    # Add language indicator
+                    lang = item.get('original_language', '').upper()
+                    lang_indicator = f" 🌐{lang}" if lang and lang != 'EN' else ""
                     
                     media_icon = "🎬" if item.get('media_type') == 'movie' else "📺"
                     
                     results.append({
-                        'display': f"{media_icon} {title}{year}",
+                        'display': f"{media_icon} {display_title}{year}{lang_indicator}",
                         'title': title,
                         'data': item
                     })
@@ -67,11 +178,11 @@ class RuntimeCalculator:
             return []
     
     def search_title(self, query: str) -> Optional[Dict]:
-        """Search for a specific movie or TV show"""
+        """Search for a specific movie or TV show - supports all languages"""
         url = f"{BASE_URL}/search/multi"
         params = {
             "query": query,
-            "language": "en-US"
+            "include_adult": False
         }
         
         try:
@@ -86,31 +197,119 @@ class RuntimeCalculator:
             return None
     
     def get_movie_details(self, movie_id: int) -> Dict:
-        """Get detailed movie information including runtime"""
+        """Get detailed movie information including runtime - supports all languages"""
         url = f"{BASE_URL}/movie/{movie_id}"
-        params = {"language": "en-US"}
+        params = {"append_to_response": "credits,keywords,reviews,videos,similar,translations"}
         
         response = requests.get(url, params=params, headers=self.headers)
         response.raise_for_status()
         return response.json()
     
     def get_tv_details(self, tv_id: int) -> Dict:
-        """Get detailed TV show information"""
+        """Get detailed TV show information - supports all languages"""
         url = f"{BASE_URL}/tv/{tv_id}"
-        params = {"language": "en-US"}
+        params = {"append_to_response": "credits,keywords,content_ratings,videos,similar,translations"}
         
         response = requests.get(url, params=params, headers=self.headers)
         response.raise_for_status()
         return response.json()
     
     def get_season_details(self, tv_id: int, season_number: int) -> Dict:
-        """Get detailed season information including episode runtimes"""
+        """Get detailed season information including episode runtimes - supports all languages"""
         url = f"{BASE_URL}/tv/{tv_id}/season/{season_number}"
-        params = {"language": "en-US"}
+        params = {"append_to_response": "credits,videos"}
         
         response = requests.get(url, params=params, headers=self.headers)
         response.raise_for_status()
         return response.json()
+
+class WatchlistManager:
+    """Manage user's watchlist using session state"""
+    
+    @staticmethod
+    def initialize_watchlist():
+        """Initialize watchlist in session state"""
+        if 'watchlist_watching' not in st.session_state:
+            st.session_state.watchlist_watching = []
+        if 'watchlist_want_to_watch' not in st.session_state:
+            st.session_state.watchlist_want_to_watch = []
+    
+    @staticmethod
+    def add_to_watchlist(media_data: Dict, list_type: str):
+        """Add item to watchlist"""
+        WatchlistManager.initialize_watchlist()
+        
+        item = {
+            'id': media_data.get('id'),
+            'title': media_data.get('title') or media_data.get('name'),
+            'original_title': media_data.get('original_title') or media_data.get('original_name', ''),
+            'media_type': media_data.get('media_type'),
+            'poster_path': media_data.get('poster_path'),
+            'year': media_data.get('release_date', '')[:4] if media_data.get('release_date') else media_data.get('first_air_date', '')[:4],
+            'language': media_data.get('original_language', 'en').upper(),
+            'added_date': datetime.datetime.now().strftime('%Y-%m-%d'),
+            'is_custom': False
+        }
+        
+        if list_type == 'watching':
+            if item not in st.session_state.watchlist_watching:
+                st.session_state.watchlist_watching.append(item)
+                return True
+        elif list_type == 'want_to_watch':
+            if item not in st.session_state.watchlist_want_to_watch:
+                st.session_state.watchlist_want_to_watch.append(item)
+                return True
+        return False
+    
+    @staticmethod
+    def add_custom_item(title: str, media_type: str, list_type: str, year: str = "", notes: str = ""):
+        """Add custom item to watchlist"""
+        WatchlistManager.initialize_watchlist()
+        
+        item = {
+            'id': f"custom_{len(st.session_state.watchlist_watching) + len(st.session_state.watchlist_want_to_watch)}_{int(datetime.datetime.now().timestamp())}",
+            'title': title,
+            'original_title': '',
+            'media_type': media_type,
+            'poster_path': None,
+            'year': year,
+            'language': 'CUSTOM',
+            'added_date': datetime.datetime.now().strftime('%Y-%m-%d'),
+            'notes': notes,
+            'is_custom': True
+        }
+        
+        if list_type == 'watching':
+            st.session_state.watchlist_watching.append(item)
+        elif list_type == 'want_to_watch':
+            st.session_state.watchlist_want_to_watch.append(item)
+        
+        return True
+    
+    @staticmethod
+    def remove_from_watchlist(item_id: str, list_type: str):
+        """Remove item from watchlist"""
+        if list_type == 'watching':
+            st.session_state.watchlist_watching = [
+                item for item in st.session_state.watchlist_watching 
+                if str(item['id']) != str(item_id)
+            ]
+        elif list_type == 'want_to_watch':
+            st.session_state.watchlist_want_to_watch = [
+                item for item in st.session_state.watchlist_want_to_watch 
+                if str(item['id']) != str(item_id)
+            ]
+    
+    @staticmethod
+    def is_in_watchlist(item_id: int, list_type: str) -> bool:
+        """Check if item is in watchlist"""
+        WatchlistManager.initialize_watchlist()
+        
+        if list_type == 'watching':
+            return any(str(item['id']) == str(item_id) for item in st.session_state.watchlist_watching)
+        elif list_type == 'want_to_watch':
+            return any(str(item['id']) == str(item_id) for item in st.session_state.watchlist_want_to_watch)
+        return False
 
 def format_time(minutes: int) -> str:
     """Convert minutes to HH:MM format"""
@@ -153,6 +352,200 @@ def get_review_summary(rating: float, vote_count: int) -> Tuple[str, str, str]:
     
     return sentiment, description, color
 
+def get_detailed_description(media_data: Dict, media_type: str) -> str:
+    """Create a comprehensive detailed description with extensive information"""
+    overview = media_data.get('overview', 'No summary available.')
+    
+    # Get additional details for comprehensive description
+    additional_sections = []
+    
+    if media_type == 'movie':
+        # Movie specific comprehensive details
+        budget = media_data.get('budget', 0)
+        revenue = media_data.get('revenue', 0)
+        production_companies = media_data.get('production_companies', [])
+        production_countries = media_data.get('production_countries', [])
+        spoken_languages = media_data.get('spoken_languages', [])
+        runtime = media_data.get('runtime', 0)
+        
+        # Production Information
+        prod_info = []
+        if budget > 0:
+            prod_info.append(f"Budget: ${budget:,}")
+        if revenue > 0:
+            prod_info.append(f"Box Office: ${revenue:,}")
+            if budget > 0:
+                profit = revenue - budget
+                roi = ((revenue - budget) / budget) * 100 if budget > 0 else 0
+                prod_info.append(f"Profit: ${profit:,} (ROI: {roi:.1f}%)")
+        
+        if prod_info:
+            additional_sections.append("💰 **Financial Performance:**\n" + " • ".join(prod_info))
+        
+        # Production Details
+        if production_companies:
+            companies = [company['name'] for company in production_companies[:4]]
+            additional_sections.append(f"🏢 **Production:** {', '.join(companies)}")
+        
+        if production_countries:
+            countries = [country['name'] for country in production_countries]
+            additional_sections.append(f"🌍 **Countries:** {', '.join(countries)}")
+        
+        if spoken_languages and len(spoken_languages) > 1:
+            languages = [lang['english_name'] for lang in spoken_languages]
+            additional_sections.append(f"🗣️ **Languages:** {', '.join(languages)}")
+        
+        if runtime > 0:
+            additional_sections.append(f"⏱️ **Runtime:** {format_time(runtime)} ({runtime} minutes)")
+    
+    else:  # TV show
+        # TV show comprehensive details
+        networks = media_data.get('networks', [])
+        created_by = media_data.get('created_by', [])
+        first_air_date = media_data.get('first_air_date', '')
+        last_air_date = media_data.get('last_air_date', '')
+        status = media_data.get('status', '')
+        type_info = media_data.get('type', '')
+        origin_country = media_data.get('origin_country', [])
+        languages = media_data.get('languages', [])
+        number_of_seasons = media_data.get('number_of_seasons', 0)
+        number_of_episodes = media_data.get('number_of_episodes', 0)
+        
+        # Show Status and Dates
+        if first_air_date:
+            air_info = f"First Aired: {first_air_date}"
+            if last_air_date and last_air_date != first_air_date:
+                air_info += f" | Last Aired: {last_air_date}"
+            if status:
+                air_info += f" | Status: {status}"
+            additional_sections.append(f"📅 **Air Dates:** {air_info}")
+        
+        # Show Statistics
+        if number_of_seasons > 0 or number_of_episodes > 0:
+            stats = []
+            if number_of_seasons > 0:
+                stats.append(f"{number_of_seasons} Season{'s' if number_of_seasons != 1 else ''}")
+            if number_of_episodes > 0:
+                stats.append(f"{number_of_episodes} Episode{'s' if number_of_episodes != 1 else ''}")
+            if type_info:
+                stats.append(f"Type: {type_info}")
+            additional_sections.append(f"📊 **Show Info:** {' • '.join(stats)}")
+        
+        # Network and Creator Info
+        if networks:
+            network_names = [network['name'] for network in networks]
+            additional_sections.append(f"📺 **Network:** {', '.join(network_names)}")
+        
+        if created_by:
+            creators = [creator['name'] for creator in created_by]
+            additional_sections.append(f"👨‍💼 **Created by:** {', '.join(creators)}")
+        
+        if origin_country:
+            additional_sections.append(f"🌍 **Origin:** {', '.join(origin_country)}")
+        
+        if languages and len(languages) > 1:
+            additional_sections.append(f"🗣️ **Languages:** {', '.join(languages)}")
+    
+    # Keywords for context
+    keywords = media_data.get('keywords', {})
+    if keywords:
+        keyword_list = keywords.get('keywords', []) if media_type == 'tv' else keywords.get('keywords', [])
+        if keyword_list:
+            keyword_names = [kw['name'] for kw in keyword_list[:8]]
+            additional_sections.append(f"🏷️ **Themes:** {', '.join(keyword_names)}")
+    
+    # Reviews snippet
+    reviews = media_data.get('reviews', {})
+    if reviews and reviews.get('results'):
+        review = reviews['results'][0]
+        author = review.get('author', 'Anonymous')
+        content = review.get('content', '')[:200] + "..." if len(review.get('content', '')) > 200 else review.get('content', '')
+        if content:
+            additional_sections.append(f"📝 **Review by {author}:** \"{content}\"")
+    
+    # Combine everything
+    detailed_description = f"**📖 Plot Summary:**\n{overview}"
+    
+    if additional_sections:
+        detailed_description += "\n\n" + "\n\n".join(additional_sections)
+    
+    return detailed_description
+
+def get_star_cast(media_data: Dict, limit: int = 8) -> List[Dict]:
+    """Extract star cast information from credits"""
+    credits = media_data.get('credits', {})
+    cast = credits.get('cast', [])
+    
+    star_cast = []
+    for actor in cast[:limit]:
+        star_cast.append({
+            'name': actor.get('name', 'Unknown'),
+            'character': actor.get('character', 'Unknown Role'),
+            'profile_path': actor.get('profile_path'),
+            'popularity': actor.get('popularity', 0)
+        })
+    
+    return star_cast
+
+def display_star_cast(star_cast: List[Dict]):
+    """Display star cast with expandable view and smaller images"""
+    if not star_cast:
+        st.info("🎭 Cast information not available")
+        return
+    
+    st.markdown("### 🌟 Star Cast")
+    
+    # Show first 4 cast members by default
+    initial_count = 4
+    show_more = len(star_cast) > initial_count
+    
+    # Display initial cast members
+    cols_per_row = 4
+    for i in range(0, min(initial_count, len(star_cast)), cols_per_row):
+        cols = st.columns(cols_per_row)
+        for j, actor in enumerate(star_cast[i:i+cols_per_row]):
+            if i + j < initial_count:
+                with cols[j]:
+                    # Display smaller actor photo
+                    if actor['profile_path']:
+                        photo_url = f"https://image.tmdb.org/t/p/w185{actor['profile_path']}"
+                        st.image(photo_url, width=80)
+                    else:
+                        st.write("🎭")
+                    
+                    st.markdown(f"**{actor['name']}**")
+                    st.caption(f"as {actor['character']}")
+    
+    # View More functionality
+    if show_more:
+        if st.button("👁️ View More Cast", key="view_more_cast"):
+            st.session_state.show_full_cast = not st.session_state.get('show_full_cast', False)
+        
+        if st.session_state.get('show_full_cast', False):
+            st.markdown("#### 👥 Full Cast")
+            
+            # Display remaining cast in smaller format
+            remaining_cast = star_cast[initial_count:]
+            cols_per_row = 6  # More columns for smaller display
+            
+            for i in range(0, len(remaining_cast), cols_per_row):
+                cols = st.columns(cols_per_row)
+                for j, actor in enumerate(remaining_cast[i:i+cols_per_row]):
+                    with cols[j]:
+                        # Even smaller images for expanded view
+                        if actor['profile_path']:
+                            photo_url = f"https://image.tmdb.org/t/p/w185{actor['profile_path']}"
+                            st.image(photo_url, width=60)
+                        else:
+                            st.write("🎭")
+                        
+                        st.markdown(f"**{actor['name']}**", help=f"Character: {actor['character']}")
+                        st.caption(actor['character'][:20] + "..." if len(actor['character']) > 20 else actor['character'])
+            
+            if st.button("👁️ Show Less", key="show_less_cast"):
+                st.session_state.show_full_cast = False
+                st.rerun()
+
 def create_progress_gauge(current: int, total: int) -> go.Figure:
     """Create a progress gauge chart"""
     if total == 0:
@@ -185,9 +578,7 @@ def create_progress_gauge(current: int, total: int) -> go.Figure:
     return fig
 
 def display_media_showcase(media_data: Dict, media_type: str):
-    """Display comprehensive media information with poster and summary"""
-    col1, col2 = st.columns([1, 2])
-    
+    """Display comprehensive media information with adaptive poster sizing and detailed description"""
     if media_type == 'movie':
         title = media_data.get('title', 'Unknown')
         year = media_data.get('release_date', '')[:4] if media_data.get('release_date') else 'Unknown'
@@ -197,10 +588,23 @@ def display_media_showcase(media_data: Dict, media_type: str):
         year = media_data.get('first_air_date', '')[:4] if media_data.get('first_air_date') else 'Unknown'
         genres = [genre['name'] for genre in media_data.get('genres', [])]
     
-    overview = media_data.get('overview', 'No summary available.')
+    # Get detailed description
+    detailed_description = get_detailed_description(media_data, media_type)
+    
     rating = media_data.get('vote_average', 0)
     vote_count = media_data.get('vote_count', 0)
     poster_path = media_data.get('poster_path', '')
+    
+    # Calculate adaptive column sizes based on description length
+    description_length = len(detailed_description)
+    if description_length > 800:
+        col_ratio = [1, 3]  # More space for text
+    elif description_length > 400:
+        col_ratio = [1, 2]  # Balanced
+    else:
+        col_ratio = [1, 1.5]  # More space for poster
+    
+    col1, col2 = st.columns(col_ratio)
     
     # Display poster
     with col1:
@@ -209,6 +613,33 @@ def display_media_showcase(media_data: Dict, media_type: str):
             st.image(poster_url, caption=f"{title} Poster", use_column_width=True)
         else:
             st.info("📽️ No poster available")
+        
+        # Watchlist buttons
+        st.markdown("#### 📝 Add to Watchlist")
+        
+        watching_button = st.button(
+            "📺 Currently Watching" if not WatchlistManager.is_in_watchlist(media_data.get('id'), 'watching') else "✅ Currently Watching",
+            key=f"watching_{media_data.get('id')}",
+            use_container_width=True
+        )
+        
+        want_to_watch_button = st.button(
+            "⭐ Want to Watch" if not WatchlistManager.is_in_watchlist(media_data.get('id'), 'want_to_watch') else "✅ Want to Watch",
+            key=f"want_to_watch_{media_data.get('id')}",
+            use_container_width=True
+        )
+        
+        if watching_button:
+            if WatchlistManager.add_to_watchlist(media_data, 'watching'):
+                st.success("Added to Currently Watching!")
+            else:
+                st.info("Already in Currently Watching list")
+        
+        if want_to_watch_button:
+            if WatchlistManager.add_to_watchlist(media_data, 'want_to_watch'):
+                st.success("Added to Want to Watch!")
+            else:
+                st.info("Already in Want to Watch list")
     
     # Display information
     with col2:
@@ -224,9 +655,132 @@ def display_media_showcase(media_data: Dict, media_type: str):
         st.markdown(f"*{description}*")
         st.caption(f"Based on {vote_count:,} user ratings")
         
-        # Summary
-        st.markdown("### 📝 Summary")
-        st.write(overview)
+        # Detailed Summary
+        st.markdown("### 📝 Detailed Summary")
+        st.write(detailed_description)
+    
+    # Display star cast below
+    star_cast = get_star_cast(media_data)
+    display_star_cast(star_cast)
+
+def display_watchlist():
+    """Display the user's watchlist with custom addition feature"""
+    st.markdown("## 📋 My Watchlist")
+    
+    WatchlistManager.initialize_watchlist()
+    
+    # Add custom item section
+    with st.expander("➕ Add Custom Movie/Show", expanded=False):
+        st.markdown("### Add anything you want to your watchlist!")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            custom_title = st.text_input("Title", placeholder="e.g., The Godfather", key="custom_title")
+            custom_year = st.text_input("Year (optional)", placeholder="e.g., 1972", key="custom_year")
+        
+        with col2:
+            custom_type = st.selectbox("Type", ["movie", "tv"], format_func=lambda x: "🎬 Movie" if x == "movie" else "📺 TV Show", key="custom_type")
+            custom_list = st.selectbox("Add to", ["want_to_watch", "watching"], format_func=lambda x: "⭐ Want to Watch" if x == "want_to_watch" else "📺 Currently Watching", key="custom_list")
+        
+        custom_notes = st.text_area("Notes (optional)", placeholder="Any additional notes about this title...", key="custom_notes")
+        
+        if st.button("➕ Add to Watchlist", type="primary", key="add_custom"):
+            if custom_title.strip():
+                WatchlistManager.add_custom_item(
+                    title=custom_title.strip(),
+                    media_type=custom_type,
+                    list_type=custom_list,
+                    year=custom_year.strip(),
+                    notes=custom_notes.strip()
+                )
+                st.success(f"Added '{custom_title}' to your watchlist!")
+                st.rerun()
+            else:
+                st.error("Please enter a title!")
+    
+    tab1, tab2 = st.tabs(["📺 Currently Watching", "⭐ Want to Watch"])
+    
+    with tab1:
+        if st.session_state.watchlist_watching:
+            st.markdown(f"### {len(st.session_state.watchlist_watching)} items currently watching")
+            
+            for i, item in enumerate(st.session_state.watchlist_watching):
+                col1, col2, col3 = st.columns([1, 3, 1])
+                
+                with col1:
+                    if item.get('poster_path'):
+                        poster_url = f"https://image.tmdb.org/t/p/w185{item['poster_path']}"
+                        st.image(poster_url, width=80)
+                    else:
+                        icon = "🎬" if item['media_type'] == 'movie' else "📺"
+                        st.markdown(f"<div style='text-align: center; font-size: 50px;'>{icon}</div>", unsafe_allow_html=True)
+                
+                with col2:
+                    # Title with language indicator
+                    title_display = item['title']
+                    if item.get('original_title') and item['original_title'] != item['title']:
+                        title_display = f"{item['title']} ({item['original_title']})"
+                    
+                    media_icon = "🎬" if item['media_type'] == 'movie' else "📺"
+                    lang_indicator = f" 🌐{item.get('language', '')}" if item.get('language') and item.get('language') not in ['EN', 'CUSTOM'] else ""
+                    custom_indicator = " 🔧" if item.get('is_custom') else ""
+                    
+                    st.markdown(f"**{media_icon} {title_display} ({item.get('year', 'N/A')})**{lang_indicator}{custom_indicator}")
+                    st.caption(f"Added: {item['added_date']}")
+                    
+                    # Show notes for custom items
+                    if item.get('notes'):
+                        st.caption(f"📝 {item['notes']}")
+                
+                with col3:
+                    if st.button("❌", key=f"remove_watching_{i}", help="Remove from list"):
+                        WatchlistManager.remove_from_watchlist(item['id'], 'watching')
+                        st.rerun()
+                
+                st.divider()
+        else:
+            st.info("No items in your currently watching list")
+    
+    with tab2:
+        if st.session_state.watchlist_want_to_watch:
+            st.markdown(f"### {len(st.session_state.watchlist_want_to_watch)} items to watch")
+            
+            for i, item in enumerate(st.session_state.watchlist_want_to_watch):
+                col1, col2, col3 = st.columns([1, 3, 1])
+                
+                with col1:
+                    if item.get('poster_path'):
+                        poster_url = f"https://image.tmdb.org/t/p/w185{item['poster_path']}"
+                        st.image(poster_url, width=80)
+                    else:
+                        icon = "🎬" if item['media_type'] == 'movie' else "📺"
+                        st.markdown(f"<div style='text-align: center; font-size: 50px;'>{icon}</div>", unsafe_allow_html=True)
+                
+                with col2:
+                    # Title with language indicator
+                    title_display = item['title']
+                    if item.get('original_title') and item['original_title'] != item['title']:
+                        title_display = f"{item['title']} ({item['original_title']})"
+                    
+                    media_icon = "🎬" if item['media_type'] == 'movie' else "📺"
+                    lang_indicator = f" 🌐{item.get('language', '')}" if item.get('language') and item.get('language') not in ['EN', 'CUSTOM'] else ""
+                    custom_indicator = " 🔧" if item.get('is_custom') else ""
+                    
+                    st.markdown(f"**{media_icon} {title_display} ({item.get('year', 'N/A')})**{lang_indicator}{custom_indicator}")
+                    st.caption(f"Added: {item['added_date']}")
+                    
+                    # Show notes for custom items
+                    if item.get('notes'):
+                        st.caption(f"📝 {item['notes']}")
+                
+                with col3:
+                    if st.button("❌", key=f"remove_want_to_watch_{i}", help="Remove from list"):
+                        WatchlistManager.remove_from_watchlist(item['id'], 'want_to_watch')
+                        st.rerun()
+                
+                st.divider()
+        else:
+            st.info("No items in your want to watch list")
 
 def process_movie(calculator: RuntimeCalculator, movie_data: Dict) -> int:
     """Process movie data and return runtime in minutes"""
@@ -577,7 +1131,7 @@ def main():
         page_title="🎬 Runtime Calculator",
         page_icon="🎬",
         layout="wide",
-        initial_sidebar_state="collapsed"
+        initial_sidebar_state="expanded"
     )
     
     # Initialize session state
@@ -586,12 +1140,29 @@ def main():
     if 'selected_result' not in st.session_state:
         st.session_state.selected_result = None
     
+    # Initialize watchlist
+    WatchlistManager.initialize_watchlist()
+    
+    # Sidebar navigation
+    with st.sidebar:
+        st.markdown("# 🎬 Navigation")
+        page = st.radio(
+            "Choose a page:",
+            ["🔍 Search Movies/TV", "📋 My Watchlist"],
+            key="navigation"
+        )
+    
     # Header
     st.markdown("""
     # 🎬 Movie & TV Show Runtime Calculator
     
-    ### Get detailed runtime information and plan your viewing schedule!
+    ### Get detailed runtime information, cast details, and plan your viewing schedule!
     """)
+    
+    # Handle page navigation
+    if page == "📋 My Watchlist":
+        display_watchlist()
+        return
     
     # Search interface
     if not st.session_state.search_completed:
@@ -664,4 +1235,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    #streamlit run runtimeradar.py 
+    #streamlit run streamlit_app.py
