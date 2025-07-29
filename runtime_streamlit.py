@@ -498,7 +498,7 @@ def display_media_showcase(media_data: Dict, media_type: str):
     with col1:
         if poster_path:
             poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}"
-            st.image(poster_url, caption=f"{title} Poster", use_column_width=True)
+            st.image(poster_url, caption=f"{title} Poster", use_container_width=True)
         else:
             st.info("📽️ No poster available")
         
@@ -562,7 +562,7 @@ def display_media_card(media: Dict, index: str):
     rating = media.get('vote_average', 0)
     
     if media.get('poster_path'):
-        st.image(f"https://image.tmdb.org/t/p/w342{media['poster_path']}", use_column_width=True)
+        st.image(f"https://image.tmdb.org/t/p/w342{media['poster_path']}", use_container_width=True)
     else:
         st.markdown(
             "<div style='height:300px; display:flex; align-items:center; justify-content:center; background-color:#222; border-radius:10px; color:white;'>No Image</div>", 
