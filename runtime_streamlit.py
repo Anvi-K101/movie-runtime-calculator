@@ -98,8 +98,8 @@ def display_media_showcase(media_data: dict, media_type: str):
     star_cast = get_star_cast(media_data)
     display_star_cast(star_cast)#!/usr/bin/env python3
 """
-🎬 Movie & TV Show Runtime Calculator - Enhanced Streamlit Web App
-Fetches detailed runtime information, cast data, and helps with viewing schedules
+🎬 Movie & TV Show Runtime Calculator - Web App that fetches detailed 
+Runtime information, cast data, and helps with viewing schedules
 Includes watchlist functionality and detailed descriptions
 """
 
@@ -1229,7 +1229,7 @@ def main():
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: #666;'>
-        Made with ❤️ using Streamlit and TMDb API
+        Made by ✨Anvi Karanjkarstar✨
     </div>
     """, unsafe_allow_html=True)
 
